@@ -24,37 +24,11 @@ recplot(p)
 
 where `p` is a ggplot object with a date-based x-axis.
 
-#### Example 1: Single Series
-
-Download Real GDP (GDPC1) from FRED, filter to 1970 onward and plot.
-
-``` r
-gdp <- fredr(series_id = "GDPC1")
-gdp <- gdp[gdp$date >= as.Date("1970-01-01"), ]
-
-p <- ggplot(gdp, aes(x = date, y = value)) +
-  geom_line(color = "blue") +
-  scale_x_date(expand = c(0, 0)) +
-  xlab("") + ylab("Billions of Chained 2017 Dollars") +
-  ggtitle("Real GDP") +
-  theme_bw()
-p
-```
-
-![](ActGraphs_files/figure-gfm/single-series-1.png)<!-- -->
-
-Now pass the plot to `recplot()` to add recession bands:
-
-``` r
-recplot(p)
-```
-
-![](ActGraphs_files/figure-gfm/single-series-rec-1.png)<!-- -->
-
-#### Example 2: Two Series
+#### Example
 
 Download Real GDP (GDPC1) and Real Gross Private Domestic Investment
-(GPDIC1), combine them into a single data frame and plot.
+(GPDIC1), compute year-over-year growth rates as log differences, and
+plot.
 
 ``` r
 library(reshape2)
@@ -65,25 +39,89 @@ inv <- fredr(series_id = "GPDIC1")
 gdp <- gdp[gdp$date >= as.Date("1970-01-01"), c("date", "value")]
 inv <- inv[inv$date >= as.Date("1970-01-01"), c("date", "value")]
 
-combined <- merge(gdp, inv, by = "date", suffixes = c("_gdp", "_inv"))
+# Year-over-year log difference (lag 4 quarters), in percent
+gdp$growth <- c(rep(NA, 4), 100 * diff(log(gdp$value), lag = 4))
+inv$growth <- c(rep(NA, 4), 100 * diff(log(inv$value), lag = 4))
+
+combined <- merge(gdp[, c("date", "growth")], inv[, c("date", "growth")],
+                  by = "date", suffixes = c("_gdp", "_inv"))
 colnames(combined) <- c("date", "Real GDP", "Real Investment")
+combined <- combined[complete.cases(combined), ]
 melted <- melt(combined, id = "date")
 
 p2 <- ggplot(melted, aes(x = date, y = value, colour = variable)) +
   geom_line() +
+  scale_colour_manual(values = c("Real GDP" = "darkblue", "Real Investment" = "darkred")) +
   scale_x_date(expand = c(0, 0)) +
-  xlab("") + ylab("Billions of Chained 2017 Dollars") +
-  ggtitle("Real GDP and Real Investment") +
+  xlab("") + ylab("Percent") +
+  ggtitle("Real GDP and Real Investment — Year-over-Year Growth Rates") +
   theme_bw()
-p2
 ```
-
-![](ActGraphs_files/figure-gfm/two-series-1.png)<!-- -->
-
-Add recession shading with `recplot()`:
 
 ``` r
 recplot(p2)
 ```
 
 ![](ActGraphs_files/figure-gfm/two-series-rec-1.png)<!-- -->
+
+## 2. *`BEAdat()`:*
+
+Downloads a single time series from the Bureau of Economic Analysis
+(BEA) API and returns it as a tibble with columns `date`, `series_id`,
+and `value`, mirroring the format returned by `fredr()`. The function is
+defined in `beafunctions.R`.
+
+**Arguments:**
+
+| Argument | Description |
+|----|----|
+| `datasetname` | BEA dataset (e.g. `"NIPA"`) |
+| `TableName` | Table identifier (e.g. `"T10109"` for Table 1.1.9) |
+| `series` | Line number within the table (character, e.g. `"1"`) |
+| `freq` | Frequency: `"A"` (annual), `"Q"` (quarterly), `"M"` (monthly) |
+
+**Usage:**
+
+``` r
+df <- BEAdat(datasetname, TableName, series, freq)
+# Returns a tibble with columns: date, series_id, value
+```
+
+#### Example: GDP Implicit Price Deflator — Annual Growth Rate
+
+Download the GDP Implicit Price Deflator from NIPA Table 1.1.9, Line 1,
+at quarterly frequency. Compute the year-over-year growth rate as the
+log difference (log of current quarter minus log of the same quarter one
+year prior), plot with ggplot2, and pass to `recplot()` for recession
+shading.
+
+``` r
+library(bea.R)
+library(zoo)
+source("beafunctions.R")
+
+# Download GDP Implicit Price Deflator (Table 1.1.9, Line 1, Quarterly)
+deflator <- BEAdat("NIPA", "T10109", "1", "Q")
+
+# Year-over-year log difference (lag 4 quarters), in percent
+deflator$growth <- c(rep(NA, 4), 100 * diff(log(deflator$value), lag = 4))
+deflator <- deflator[!is.na(deflator$growth), ]
+
+p3 <- ggplot(deflator, aes(x = date, y = growth)) +
+  geom_line(color = "darkred", linewidth = 0.8) +
+  scale_x_date(expand = c(0, 0)) +
+  xlab("") + ylab("Percent") +
+  ggtitle("GDP Implicit Price Deflator — Year-over-Year Growth Rate") +
+  theme_bw()
+p3
+```
+
+![](ActGraphs_files/figure-gfm/bea-deflator-1.png)<!-- -->
+
+Now pass the plot to `recplot()` to add recession bands:
+
+``` r
+recplot(p3)
+```
+
+![](ActGraphs_files/figure-gfm/bea-deflator-rec-1.png)<!-- -->
